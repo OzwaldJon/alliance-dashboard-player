@@ -55,6 +55,83 @@ function isPoiObjective(o: any): boolean {
 export function initTeamObjectivesOverlay(ctx: AppContext): void {
   let overlay: HTMLElement | null = null;
   let timer: number | null = null;
+  let raf: number | null = null;
+  let lastRafTick = 0;
+
+  let evRegion: any = null;
+  let evCities: any = null;
+  let evAttached = false;
+
+  const onRegionMove = () => tick();
+  const onRegionZoom = () => tick();
+  const onSectorUpdated = () => tick();
+  const onCitiesChange = () => tick();
+
+  function detachEvents(api?: any): void {
+    try {
+      const ClientLib: any = api && api.ClientLib ? api.ClientLib : (window as any).ClientLib;
+      const util: any = (window as any).webfrontend && (window as any).webfrontend.phe && (window as any).webfrontend.phe.cnc && (window as any).webfrontend.phe.cnc.Util ? (window as any).webfrontend.phe.cnc.Util : null;
+      if (!ClientLib || !util || typeof util.detachNetEvent !== 'function') {
+        evRegion = null;
+        evCities = null;
+        evAttached = false;
+        return;
+      }
+
+      try {
+        if (evRegion) {
+          util.detachNetEvent(evRegion, 'PositionChange', ClientLib.Vis.PositionChange, ctx, onRegionMove);
+          util.detachNetEvent(evRegion, 'ZoomFactorChange', ClientLib.Vis.ZoomFactorChange, ctx, onRegionZoom);
+          util.detachNetEvent(evRegion, 'SectorUpdated', ClientLib.Vis.Region.SectorUpdated, ctx, onSectorUpdated);
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (evCities) {
+          util.detachNetEvent(evCities, 'Change', ClientLib.Data.CitiesChange, ctx, onCitiesChange);
+        }
+      } catch {
+        // ignore
+      }
+    } catch {
+      // ignore
+    }
+
+    evRegion = null;
+    evCities = null;
+    evAttached = false;
+  }
+
+  function tryAttachEvents(api: any, region: any): void {
+    try {
+      const ClientLib: any = api && api.ClientLib ? api.ClientLib : null;
+      const util: any = (window as any).webfrontend && (window as any).webfrontend.phe && (window as any).webfrontend.phe.cnc && (window as any).webfrontend.phe.cnc.Util ? (window as any).webfrontend.phe.cnc.Util : null;
+      if (!ClientLib || !util || typeof util.attachNetEvent !== 'function') return;
+      if (!region) return;
+
+      // Already attached to this region
+      if (evAttached && evRegion === region) return;
+
+      // Region changed, detach old
+      if (evAttached) detachEvents(api);
+
+      const md = api.mainData || (ClientLib.Data && ClientLib.Data.MainData && ClientLib.Data.MainData.GetInstance ? ClientLib.Data.MainData.GetInstance() : null);
+      const cities = md && typeof md.get_Cities === 'function' ? md.get_Cities() : null;
+
+      util.attachNetEvent(region, 'PositionChange', ClientLib.Vis.PositionChange, ctx, onRegionMove);
+      util.attachNetEvent(region, 'ZoomFactorChange', ClientLib.Vis.ZoomFactorChange, ctx, onRegionZoom);
+      util.attachNetEvent(region, 'SectorUpdated', ClientLib.Vis.Region.SectorUpdated, ctx, onSectorUpdated);
+      if (cities) util.attachNetEvent(cities, 'Change', ClientLib.Data.CitiesChange, ctx, onCitiesChange);
+
+      evRegion = region;
+      evCities = cities;
+      evAttached = true;
+    } catch {
+      // ignore
+    }
+  }
 
   function ensureOverlay(): HTMLElement | null {
     try {
@@ -92,6 +169,20 @@ export function initTeamObjectivesOverlay(ctx: AppContext): void {
     } catch {
       // ignore
     }
+    try {
+      if (raf !== null) {
+        window.cancelAnimationFrame(raf);
+        raf = null;
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      detachEvents(getGameApi({ refresh: true }));
+    } catch {
+      // ignore
+    }
     clear();
   }
 
@@ -118,6 +209,9 @@ export function initTeamObjectivesOverlay(ctx: AppContext): void {
         clear();
         return;
       }
+
+      // Prefer event-driven updates like Shockr Tools; if this succeeds we can avoid heavy polling.
+      tryAttachEvents(api, region);
 
       if (!visMain || typeof (visMain as any).ScreenPosFromWorldPosX !== 'function' || typeof (visMain as any).ScreenPosFromWorldPosY !== 'function') {
         clear();
@@ -236,8 +330,33 @@ export function initTeamObjectivesOverlay(ctx: AppContext): void {
   }
 
   function start(): void {
-    if (timer !== null) return;
-    timer = window.setInterval(tick, 900);
+    if (timer !== null || raf !== null) return;
+
+    // Minimal fallback polling (events usually keep this updated)
+    timer = window.setInterval(() => {
+      try {
+        if (!evAttached) tick();
+      } catch {
+        // ignore
+      }
+    }, 1200);
+
+    // RAF fallback (useful if events fail for any reason)
+    const loop = (t: number) => {
+      try {
+        if (evAttached) {
+          // If events are attached, we don't need continuous RAF work.
+          lastRafTick = t;
+        } else if (!lastRafTick || t - lastRafTick > 60) {
+          lastRafTick = t;
+          tick();
+        }
+      } catch {
+        // ignore
+      }
+      raf = window.requestAnimationFrame(loop);
+    };
+    raf = window.requestAnimationFrame(loop);
     tick();
   }
 

@@ -4,10 +4,73 @@ import { computeTierForPlayer, getEffectiveTargetsForPlayer, getPlayerTeamId } f
 import { centerMapTo } from '../../services/map';
 import { loadLastBulletin } from '../../services/getbackBulletin';
 import { loadTeams, loadAssignments } from '../teams/model';
+import { makeTabIcon } from '../../app/icons';
 
 export function registerProfileTabTs(): void {
   const ctx = getAppContext();
   const { registry, makeEl, store } = ctx;
+
+  const POI_TYPE_NAME_BY_ID: Record<number, string> = {
+    1: 'Tiberium',
+    2: 'Crystal',
+    3: 'Reactor',
+    4: 'Tungsten',
+    5: 'Uranium',
+    6: 'Aircraft',
+    7: 'Resonator'
+  };
+
+  const POI_TYPE_COLOR_BY_ID: Record<number, string> = {
+    1: '#3CE685',
+    2: '#44DBF4',
+    3: '#84DCE3',
+    4: '#CC6F66',
+    5: '#B0ADF6',
+    6: '#BDD7E5',
+    7: '#F5A6C7'
+  };
+
+  function formatObjectiveLabel(meta: {
+    poiLevel: number | null;
+    poiTypeId: number | null;
+    objectiveKind?: unknown;
+    objectiveLevel?: unknown;
+  }): { icon: string | null; text: string; color: string | null } {
+    try {
+      const kindRaw = meta.objectiveKind !== undefined && meta.objectiveKind !== null ? String(meta.objectiveKind).trim() : '';
+      const lvl = meta.objectiveLevel !== undefined && meta.objectiveLevel !== null && isFinite(Number(meta.objectiveLevel)) ? Number(meta.objectiveLevel) : null;
+
+      if (kindRaw === 'npcBase') {
+        const txt = lvl !== null ? ' [Base ' + String(lvl) + ']' : ' [Base]';
+        return { icon: 'mdi:skull', text: txt, color: '#FFD54A' };
+      }
+
+      if (kindRaw === 'tunnelExit') {
+        const txt = lvl !== null ? ' [Tunnel ' + String(lvl) + ']' : ' [Tunnel]';
+        return { icon: null, text: txt, color: null };
+      }
+
+      const poiTid = meta.poiTypeId !== null && meta.poiTypeId !== undefined && isFinite(Number(meta.poiTypeId)) ? Number(meta.poiTypeId) : null;
+      const poiLvl = meta.poiLevel !== null && meta.poiLevel !== undefined && isFinite(Number(meta.poiLevel)) ? Number(meta.poiLevel) : null;
+
+      // Tunnel exits come through as poiTypeId=0 with a level.
+      if (poiTid === 0 && poiLvl !== null) {
+        const txt = ' [Tunnel ' + String(poiLvl) + ']';
+        return { icon: null, text: txt, color: null };
+      }
+
+      if (poiTid !== null && poiTid > 0 && poiLvl !== null) {
+        const nm = POI_TYPE_NAME_BY_ID[poiTid] ? String(POI_TYPE_NAME_BY_ID[poiTid]) : 'TypeId ' + String(poiTid);
+        const txt = ' [' + nm + ' ' + String(poiLvl) + ']';
+        const col = POI_TYPE_COLOR_BY_ID[poiTid] ? String(POI_TYPE_COLOR_BY_ID[poiTid]) : null;
+        return { icon: null, text: txt, color: col };
+      }
+
+      return { icon: null, text: '', color: null };
+    } catch {
+      return { icon: null, text: '', color: null };
+    }
+  }
 
   registry.registerTab({
     id: 'profile',
@@ -498,41 +561,35 @@ export function registerProfileTabTs(): void {
           } else {
             objs.forEach((o: any) => {
               const pill = makeEl('button', { class: 'cad-btn', type: 'button' }) as HTMLButtonElement;
-              const POI_TYPE_NAME_BY_ID: Record<number, string> = {
-                1: 'Tiberium',
-                2: 'Crystal',
-                3: 'Reactor',
-                4: 'Tungsten',
-                5: 'Uranium',
-                6: 'Aircraft',
-                7: 'Resonator'
-              };
-              const POI_TYPE_COLOR_BY_ID: Record<number, string> = {
-                1: '#3CE685',
-                2: '#44DBF4',
-                3: '#84DCE3',
-                4: '#CC6F66',
-                5: '#B0ADF6',
-                6: '#BDD7E5',
-                7: '#F5A6C7'
-              };
-
               const baseTxt = String(o.x) + ':' + String(o.y);
-              let poiTxt = '';
-              let poiColor: string | null = null;
+              const fmt = formatObjectiveLabel({
+                poiLevel: o && o.poiLevel !== undefined ? (o.poiLevel as any) : null,
+                poiTypeId: o && o.poiTypeId !== undefined ? (o.poiTypeId as any) : null,
+                objectiveKind: o ? (o as any).objectiveKind : undefined,
+                objectiveLevel: o ? (o as any).objectiveLevel : undefined
+              });
+              const labelTxt = baseTxt + fmt.text;
+              const poiColor: string | null = fmt.color;
+
+              (pill as HTMLElement).innerHTML = '';
               try {
-                const lvl = o.poiLevel !== undefined && o.poiLevel !== null && isFinite(Number(o.poiLevel)) ? Number(o.poiLevel) : null;
-                const tid = o.poiTypeId !== undefined && o.poiTypeId !== null && isFinite(Number(o.poiTypeId)) ? Number(o.poiTypeId) : null;
-                if (lvl !== null && tid !== null) {
-                  const nm = POI_TYPE_NAME_BY_ID[tid] ? String(POI_TYPE_NAME_BY_ID[tid]) : 'TypeId ' + String(tid);
-                  poiTxt = ' [' + nm + ' ' + String(lvl) + ']';
-                  poiColor = POI_TYPE_COLOR_BY_ID[tid] ? String(POI_TYPE_COLOR_BY_ID[tid]) : null;
+                (pill as HTMLElement).style.display = 'inline-flex';
+                (pill as HTMLElement).style.alignItems = 'center';
+                (pill as HTMLElement).style.gap = '6px';
+              } catch {
+                // ignore
+              }
+              try {
+                if (fmt.icon) {
+                  const ico = makeTabIcon(fmt.icon, 16);
+                  if (ico) pill.appendChild(ico);
                 }
               } catch {
                 // ignore
               }
-
-              pill.textContent = baseTxt + poiTxt;
+              const tspan = makeEl('span');
+              tspan.textContent = labelTxt;
+              pill.appendChild(tspan);
               pill.style.cssText = 'border:1px solid var(--cad-accent-20);background:var(--cad-accent-08);';
               try {
                 if (poiColor) {

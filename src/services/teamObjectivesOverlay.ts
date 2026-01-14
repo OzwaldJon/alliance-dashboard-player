@@ -52,6 +52,25 @@ function isPoiObjective(o: any): boolean {
   }
 }
 
+function getTunnelLevel(o: any): number | null {
+  try {
+    if (!o) return null;
+    const kind = (o as any).objectiveKind !== undefined && (o as any).objectiveKind !== null ? String((o as any).objectiveKind).trim() : '';
+    if (kind === 'tunnelExit') {
+      const lv = Number((o as any).objectiveLevel);
+      return isFinite(lv) ? lv : null;
+    }
+
+    const tid = (o as any).poiTypeId !== undefined && (o as any).poiTypeId !== null ? Number((o as any).poiTypeId) : NaN;
+    const lvl = (o as any).poiLevel !== undefined && (o as any).poiLevel !== null ? Number((o as any).poiLevel) : NaN;
+    if (isFinite(tid) && tid === 0 && isFinite(lvl)) return lvl;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function initTeamObjectivesOverlay(ctx: AppContext): void {
   let overlay: HTMLElement | null = null;
   let timer: number | null = null;
@@ -257,6 +276,31 @@ export function initTeamObjectivesOverlay(ctx: AppContext): void {
           const left = (visMain as any).ScreenPosFromWorldPosX((x + 0.1) * gridWidth);
           if (!isFinite(top) || !isFinite(left)) return;
           if (top < 0 || left < 0 || top > viewH || left > viewW) return;
+
+          const tunnelLvl = getTunnelLevel(o);
+          if (tunnelLvl !== null) {
+            const off = Math.floor(tunnelLvl - 6);
+            const m = document.createElement('div');
+            m.className = 'cad-teamobj-marker cad-teamobj-marker--tunnel';
+            try {
+              const tn = teamName ? teamName : 'Team';
+              (m as any).title = tn + ' tunnel objective';
+            } catch {
+              // ignore
+            }
+            m.textContent = 'OFF ' + String(off) + '+';
+            m.style.cssText =
+              'position:absolute;left:' +
+              String(Math.round(left)) +
+              'px;top:' +
+              String(Math.round(top)) +
+              'px;transform:translate(-50%,-50%);pointer-events:none;' +
+              'border-radius:999px;padding:6px 10px;font-weight:1000;font-size:12px;letter-spacing:.2px;white-space:nowrap;' +
+              'background:rgba(0,0,0,.92);border:2px solid #FFD54A;color:#FFD54A;' +
+              'box-shadow:0 10px 24px rgba(0,0,0,.55), inset 0 0 0 1px rgba(0,0,0,.55);';
+            root.appendChild(m);
+            return;
+          }
 
           const size = 34;
 
